@@ -2,6 +2,7 @@ import os
 import json
 import platform
 import ctypes
+from os.path import join, getsize
 
 from config import Config
 from mongodb import Db
@@ -27,17 +28,26 @@ class Video(object):
             self.bv = Bv2av().enc(int(av[2:]))
             self.url = "https://www.bilibili.com/video/" + bv
 
-        self.name = name
-        self.path = path
+        self.name = name.replace('"', '’').replace("'", '’')
+
+        if path:
+            self.path = path
+            size = 0
+            for root, dirs, files in os.walk(path):
+                size += sum([getsize(join(root, name)) for name in files])
+            self.size = size/1024/1024
 
         self.video = {
             "bv": self.bv,
             "av": self.av,
             "url": self.url,
             "name": self.name,
-            "path": self.path
+            "path": self.path,
+            "size": self.size
         }
-        self.video_dict = json.loads(self.video.__str__().replace("'", '"').replace('""', "None"))
+        print(self.video.__str__().replace("'", '"').replace('None', '""'))
+        self.video_dict = json.loads(self.video.__str__().replace("'", '"').replace('None', '""'))
+
 
 
 def get_free_space_mb(folder):
@@ -49,6 +59,19 @@ def get_free_space_mb(folder):
     else:
         st = os.statvfs(folder)
         return st.f_bavail * st.f_frsize/1024/1024/1024.
+
+
+def size_format(size):
+    if size < 1000:
+        return '%i' % size + 'size'
+    elif 1000 <= size < 1000000:
+        return '%.1f' % float(size/1000) + 'KB'
+    elif 1000000 <= size < 1000000000:
+        return '%.1f' % float(size/1000000) + 'MB'
+    elif 1000000000 <= size < 1000000000000:
+        return '%.1f' % float(size/1000000000) + 'GB'
+    elif 1000000000000 <= size:
+        return '%.1f' % float(size/1000000000000) + 'TB'
 
 
 def download_video(url, path_storge, path_cookie):
@@ -106,11 +129,14 @@ class Storge(object):
     def if_video_exist(self, path):
         if path == '$RECYCLE.BIN':
             return False
-        for file in os.listdir(path):
-            if ".mp4" or "flv" in file:
-                return True
-            else:
-                return False
+        try:
+            for file in os.listdir(path):
+                if ".mp4" or "flv" in file:
+                    return True
+                else:
+                    return False
+        except:
+            return False
 
     def get_video_name(self, path):
         name = ""
@@ -119,34 +145,25 @@ class Storge(object):
                 name = name + file
         return name
 
-    def get_video_folder_list(self):
-        video_folder_list = []
-        for path in self.disk_list:
-            for folder in os.listdir(path):
-                if self.if_video_exist(path + folder):
-                    video_folder_list.append(path + folder)
-        return video_folder_list
-
-    def get_video_from_folder(self, folder_list):
-        video_list = list()
-        for folder in folder_list:
-            videostring = folder.split("\\")[-1]
-            path = folder + "\\"
-            name = self.get_video_name(path)
-            if videostring.isdigit():
-                video_list.append(Video(aid=videostring, name=name, path=path))
-            elif videostring[0: 2] == "av":
-                video_list.append(Video(av=videostring, name=name, path=path))
-            elif videostring[0: 2] == "BV":
-                video_list.append(Video(bv=videostring, name=name, path=path))
-        return video_list
-
     def scan(self):
-        video_folder_list = self.get_video_folder_list()
-        video_list = self.get_video_from_folder(video_folder_list)
-        for video in video_list:
-            print(video.name)
-            Db().insert(video)
+        for disk_path in self.disk_list:
+            for folder in os.listdir(disk_path):
+                try:
+                    if self.if_video_exist(disk_path + folder):
+                        videostring = folder.split("\\")[-1]
+                        path = disk_path + folder + "\\"
+                        name = self.get_video_name(path)
+                        if videostring.isdigit():
+                            video = Video(aid=videostring, name=name, path=path)
+                            Db().insert(video)
+                        elif videostring[0: 2] == "av":
+                            video = Video(av=videostring, name=name, path=path)
+                            Db().insert(video)
+                        elif videostring[0: 2] == "BV":
+                            video = Video(bv=videostring, name=name, path=path)
+                            Db().insert(video)
+                except Exception as e:
+                    print(e)
 
 
 if __name__ == "__main__":
